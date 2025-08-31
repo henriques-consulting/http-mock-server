@@ -113,7 +113,6 @@ Each request rule supports the following fields:
 - `status-code` (optional): HTTP status code (defaults to 200)
 - `headers` (optional): Map of response headers to set
 - `body` (optional): Response body (can be string or structured data for JSON)
-- `content-type` (optional): Response content type (defaults to application/json)
 
 ### Header Matching Examples
 
