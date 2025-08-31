@@ -1,0 +1,25 @@
+requests:
+  - path: /foo
+    headers:
+      content-type: "application/json"
+      accept: "(application/json)|(\\*/\\*)"
+    method: GET
+    response:
+      headers:
+        content-type: "application/json; charset=utf-8"
+      body:
+        users:
+          - id: 1
+            name: "John Doe"
+          - id: 2
+            name: "Jane Smith"
+      status-code: 200
+  - path: /foo
+    headers:
+      content-type: ".*"
+    method: POST
+    body: ".*foo.*"
+    response:
+      headers:
+        content-type: "application/json"
+      status-code: 201
