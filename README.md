@@ -135,8 +135,9 @@ headers:
   Authorization: "Bearer [A-Za-z0-9]+"
 ```
 
-## License and Contributions
+## License
 
 This project is licensed under the MIT License. Copyright © 2025 Henriques Consulting AB.
 
-**Note: This is a read-only repository. We do not accept external contributions, issues, or pull requests.**
+## Contributing
+This is a read-only repository. We do not accept external contributions.
