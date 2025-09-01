@@ -77,6 +77,17 @@ go build -o http-mock-server ./cmd
 ./http-mock-server
 ```
 
+or
+
+```bash
+# Build a docker image
+docker build -t http-mock-server --build-arg=VERSION=$(git rev-parse HEAD) .
+
+# Run the server with
+docker run -v "</path/to/folder-with-config.yaml>:/app/config" -p 8080:8080 http-mock-server
+
+```
+
 3. **Test your mock endpoints**:
 
 ```bash
