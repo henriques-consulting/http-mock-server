@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 )
 
 // LoggingMiddleware returns middleware that logs all HTTP requests and responses
@@ -32,8 +33,13 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 			// Format request headers
 			var reqHeadersBuf bytes.Buffer
-			for name, values := range r.Header {
-				for _, value := range values {
+			var reqHeaderNames []string
+			for name := range r.Header {
+				reqHeaderNames = append(reqHeaderNames, name)
+			}
+			sort.Strings(reqHeaderNames)
+			for _, name := range reqHeaderNames {
+				for _, value := range r.Header[name] {
 					reqHeadersBuf.WriteString("\n        " + name + ": " + value)
 				}
 			}
@@ -46,8 +52,13 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 			// Format response headers
 			var respHeadersBuf bytes.Buffer
-			for name, values := range lw.Header() {
-				for _, value := range values {
+			var respHeaderNames []string
+			for name := range lw.Header() {
+				respHeaderNames = append(respHeaderNames, name)
+			}
+			sort.Strings(respHeaderNames)
+			for _, name := range respHeaderNames {
+				for _, value := range lw.Header()[name] {
 					respHeadersBuf.WriteString("\n        " + name + ": " + value)
 				}
 			}
