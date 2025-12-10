@@ -6,6 +6,7 @@ import (
 	"http-mock-server/internal/config"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -46,6 +47,10 @@ func (h *MockHandler) findMatchingRule(r *http.Request) *config.RequestRule {
 		}
 
 		if !h.matchesHeaders(rule.Headers, r.Header) {
+			continue
+		}
+
+		if !h.matchesQueryParams(rule.QueryParams, r.URL.Query()) {
 			continue
 		}
 
@@ -109,6 +114,34 @@ func (h *MockHandler) matchesHeaders(ruleHeaders map[string]string, requestHeade
 		if err != nil {
 			// If pattern is invalid, treat as exact match
 			if requestValue != headerPattern {
+				return false
+			}
+		} else {
+			// Use regex matching
+			if !pattern.MatchString(requestValue) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func (h *MockHandler) matchesQueryParams(ruleParams map[string]string, requestParams url.Values) bool {
+	// If no query params are specified in the rule, it matches any request
+	if len(ruleParams) == 0 {
+		return true
+	}
+
+	// All rule query params must match
+	for paramName, paramPattern := range ruleParams {
+		requestValue := requestParams.Get(paramName)
+
+		// Compile the regex pattern
+		pattern, err := regexp.Compile(paramPattern)
+		if err != nil {
+			// If pattern is invalid, treat as exact match
+			if requestValue != paramPattern {
 				return false
 			}
 		} else {

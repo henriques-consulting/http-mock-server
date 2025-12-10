@@ -22,11 +22,12 @@ type ServerConfig struct {
 
 // RequestRule defines a single mock request matching rule
 type RequestRule struct {
-	Path     string            `yaml:"path"`
-	Headers  map[string]string `yaml:"headers"`
-	Method   string            `yaml:"method"`
-	Response ResponseSpec      `yaml:"response"`
-	Body     string            `yaml:"body"`
+	Path        string            `yaml:"path"`
+	Headers     map[string]string `yaml:"headers"`
+	QueryParams map[string]string `yaml:"queryParams"`
+	Method      string            `yaml:"method"`
+	Response    ResponseSpec      `yaml:"response"`
+	Body        string            `yaml:"body"`
 }
 
 // ResponseSpec describes the response to return when a rule matches
@@ -74,8 +75,8 @@ func Load() (*Config, error) {
 	log.Printf("Loaded configuration from %s with %d request rules", configPath, len(config.Requests))
 	for i, rule := range config.Requests {
 		log.Printf(
-			"Rule %d: Path=%s, Method=%s, Headers=%v, Body=%v",
-			i+1, rule.Path, rule.Method, rule.Headers, rule.Body,
+			"Rule %d: Path=%s, Method=%s, Headers=%v, QueryParams=%v, Body=%v",
+			i+1, rule.Path, rule.Method, rule.Headers, rule.QueryParams, rule.Body,
 		)
 	}
 	return &config, nil

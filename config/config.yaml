@@ -23,3 +23,15 @@ requests:
       headers:
         content-type: "application/json"
       status-code: 201
+  - path: /search
+    method: GET
+    queryParams:
+      q: ".+"
+      page: "[0-9]+"
+    response:
+      headers:
+        content-type: "application/json"
+      body:
+        results: []
+        query: "example"
+      status-code: 200
