@@ -1,11 +1,12 @@
 # HTTP Mock Server
 
-A simple and configurable HTTP mock server written in Go that allows you to define mock responses based on request path, method, and headers.
+A simple and configurable HTTP mock server written in Go that allows you to define mock responses based on request path, method, headers, and query parameters.
 
 ## Features
 
-- **Flexible Request Matching**: Match requests by path, HTTP method, and headers using regex patterns
+- **Flexible Request Matching**: Match requests by path, HTTP method, headers, and query parameters using regex patterns
 - **Header Regex Matching**: Use regular expressions to match header values (e.g., `.*` for any value, `application/.*` for application types)
+- **Query Parameter Matching**: Match query parameters with exact values or regex patterns
 - **Multiple Header Support**: Match against multiple headers simultaneously - all headers must match for the rule to apply
 - **Configurable Responses**: Define custom response bodies, status codes, and headers
 - **Request/Response Logging**: Comprehensive logging of all HTTP interactions
@@ -65,6 +66,19 @@ requests:
     response:
       status-code: 200
       body: "pong"
+
+  # Match query parameters
+  - path: /search
+    method: GET
+    queryParams:
+      q: ".+"
+      page: "[0-9]+"
+    response:
+      status-code: 200
+      headers:
+        Content-Type: "application/json"
+      body:
+        results: []
 ```
 
 2. **Build and run the server**:
@@ -105,6 +119,9 @@ curl http://localhost:8080/health
 
 # Test the ping endpoint
 curl http://localhost:8080/ping
+
+# Test the search endpoint with query parameters
+curl "http://localhost:8080/search?q=test&page=1"
 ```
 
 ## Configuration Reference
@@ -116,6 +133,7 @@ Each request rule supports the following fields:
 - `path` (required): The exact path to match
 - `method` (optional): HTTP method (defaults to GET)
 - `headers` (optional): Map of header name to regex pattern. All headers must match for the rule to apply
+- `queryParams` (optional): Map of query parameter name to regex pattern. All specified params must match for the rule to apply
 - `body` (optional): Regex pattern to match against request body
 - `response` (required): Response specification
 
@@ -144,6 +162,26 @@ headers:
   # Case-sensitive patterns
   Authorization: "Bearer [A-Za-z0-9]+"
 ```
+
+### Query Parameter Matching Examples
+
+```yaml
+queryParams:
+  # Exact match
+  status: "active"
+
+  # Any value (wildcard)
+  q: ".*"
+
+  # Numeric values only
+  page: "[0-9]+"
+  limit: "^(10|25|50|100)$"
+
+  # Optional UUID format
+  id: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+```
+
+Note: If `queryParams` is not specified in a rule, the rule matches requests regardless of their query string. When specified, all listed parameters must be present and match their patterns. Extra query parameters in the request (not listed in the rule) are ignored.
 
 ## License
 
