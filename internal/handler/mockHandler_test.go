@@ -3,10 +3,14 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"http-mock-server/internal/config"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
 
 func performRequest(
@@ -390,5 +394,196 @@ func TestMockHandler_QueryParamInvalidRegexFallsBackToExact(t *testing.T) {
 	rr := performRequest(h, http.MethodGet, "/test?pattern=[invalid(regex", nil, nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected exact match fallback, got status %d", rr.Code)
+	}
+}
+
+func TestMockHandler_ResponseDelayFixed(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/delayed",
+				Method: "GET",
+				ResponseDelay: &config.ResponseDelay{
+					Min: 100,
+					Max: 100,
+				},
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					Body:       "delayed response",
+				},
+			},
+		},
+	}
+
+	// Use deterministic random for testing
+	r := rand.New(rand.NewSource(42))
+	h := NewMockHandlerWithRand(cfg, r)
+
+	start := time.Now()
+	rr := performRequest(h, http.MethodGet, "/delayed", nil, nil)
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	// Should have delayed at least 100ms
+	if elapsed < 100*time.Millisecond {
+		t.Fatalf("expected delay of at least 100ms, got %v", elapsed)
+	}
+}
+
+func TestMockHandler_ResponseDelayRange(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/delayed-range",
+				Method: "GET",
+				ResponseDelay: &config.ResponseDelay{
+					Min: 50,
+					Max: 150,
+				},
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					Body:       "delayed response",
+				},
+			},
+		},
+	}
+
+	// Use deterministic random for testing
+	r := rand.New(rand.NewSource(42))
+	h := NewMockHandlerWithRand(cfg, r)
+
+	start := time.Now()
+	rr := performRequest(h, http.MethodGet, "/delayed-range", nil, nil)
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	// Should have delayed at least 50ms (the minimum)
+	if elapsed < 50*time.Millisecond {
+		t.Fatalf("expected delay of at least 50ms, got %v", elapsed)
+	}
+
+	// Should not exceed max + generous buffer for CI systems
+	if elapsed > 250*time.Millisecond {
+		t.Fatalf("delay exceeded expected range, got %v", elapsed)
+	}
+}
+
+func TestMockHandler_NoDelayWhenNotConfigured(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/fast",
+				Method: "GET",
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					Body:       "fast response",
+				},
+			},
+		},
+	}
+
+	h := NewMockHandler(cfg)
+
+	start := time.Now()
+	rr := performRequest(h, http.MethodGet, "/fast", nil, nil)
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	// Should complete quickly without delay (allowing generous buffer for CI systems)
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("expected fast response, but took %v", elapsed)
+	}
+}
+
+func TestMockHandler_CalculateDelay(t *testing.T) {
+	cfg := &config.Config{}
+	r := rand.New(rand.NewSource(42))
+	h := NewMockHandlerWithRand(cfg, r)
+
+	tests := []struct {
+		name     string
+		delay    *config.ResponseDelay
+		minMs    int
+		maxMs    int
+	}{
+		{
+			name:  "fixed delay",
+			delay: &config.ResponseDelay{Min: 100, Max: 100},
+			minMs: 100,
+			maxMs: 100,
+		},
+		{
+			name:  "range delay",
+			delay: &config.ResponseDelay{Min: 50, Max: 150},
+			minMs: 50,
+			maxMs: 150,
+		},
+		{
+			name:  "zero delay",
+			delay: &config.ResponseDelay{Min: 0, Max: 0},
+			minMs: 0,
+			maxMs: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			duration := h.calculateDelay(tt.delay)
+			ms := int(duration.Milliseconds())
+			if ms < tt.minMs || ms > tt.maxMs {
+				t.Errorf("calculateDelay() = %dms, want between %d and %d", ms, tt.minMs, tt.maxMs)
+			}
+		})
+	}
+}
+
+func TestMockHandler_ConcurrentDelayedRequests(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/concurrent",
+				Method: "GET",
+				ResponseDelay: &config.ResponseDelay{
+					Min: 10,
+					Max: 20,
+				},
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					Body:       "ok",
+				},
+			},
+		},
+	}
+
+	h := NewMockHandler(cfg)
+
+	var wg sync.WaitGroup
+	errors := make(chan error, 10)
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rr := performRequest(h, http.MethodGet, "/concurrent", nil, nil)
+			if rr.Code != http.StatusOK {
+				errors <- fmt.Errorf("unexpected status: %d", rr.Code)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		t.Error(err)
 	}
 }

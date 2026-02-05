@@ -20,14 +20,21 @@ type ServerConfig struct {
 	Port uint `yaml:"port"`
 }
 
+// ResponseDelay specifies the min/max delay before sending a response
+type ResponseDelay struct {
+	Min int `yaml:"min"` // Minimum delay in milliseconds
+	Max int `yaml:"max"` // Maximum delay in milliseconds
+}
+
 // RequestRule defines a single mock request matching rule
 type RequestRule struct {
-	Path        string            `yaml:"path"`
-	Headers     map[string]string `yaml:"headers"`
-	QueryParams map[string]string `yaml:"queryParams"`
-	Method      string            `yaml:"method"`
-	Response    ResponseSpec      `yaml:"response"`
-	Body        string            `yaml:"body"`
+	Path          string            `yaml:"path"`
+	Headers       map[string]string `yaml:"headers"`
+	QueryParams   map[string]string `yaml:"queryParams"`
+	Method        string            `yaml:"method"`
+	Response      ResponseSpec      `yaml:"response"`
+	Body          string            `yaml:"body"`
+	ResponseDelay *ResponseDelay    `yaml:"responseDelay"`
 }
 
 // ResponseSpec describes the response to return when a rule matches
@@ -75,8 +82,8 @@ func Load() (*Config, error) {
 	log.Printf("Loaded configuration from %s with %d request rules", configPath, len(config.Requests))
 	for i, rule := range config.Requests {
 		log.Printf(
-			"Rule %d: Path=%s, Method=%s, Headers=%v, QueryParams=%v, Body=%v",
-			i+1, rule.Path, rule.Method, rule.Headers, rule.QueryParams, rule.Body,
+			"Rule %d: Path=%s, Method=%s, Headers=%v, QueryParams=%v, Body=%v, ResponseDelay=%v",
+			i+1, rule.Path, rule.Method, rule.Headers, rule.QueryParams, rule.Body, rule.ResponseDelay,
 		)
 	}
 	return &config, nil
@@ -102,6 +109,10 @@ func (c *Config) setDefaults() error {
 	return nil
 }
 
+// MaxResponseDelayMs is the maximum allowed response delay to prevent misconfiguration.
+// This value must be less than the server's WriteTimeout (15 seconds) to avoid connection resets.
+const MaxResponseDelayMs = 10000
+
 func (c *Config) validate() error {
 	if c.Server.Port == 0 {
 		return fmt.Errorf("server port is required")
@@ -116,6 +127,20 @@ func (c *Config) validate() error {
 		}
 		if rule.Response.StatusCode < 100 || rule.Response.StatusCode > 599 {
 			return fmt.Errorf("request rule %d: invalid status code %d", i, rule.Response.StatusCode)
+		}
+		if delay := rule.ResponseDelay; delay != nil {
+			if delay.Min < 0 {
+				return fmt.Errorf("request rule %d: responseDelay min cannot be negative", i)
+			}
+			if delay.Max < 0 {
+				return fmt.Errorf("request rule %d: responseDelay max cannot be negative", i)
+			}
+			if delay.Min > delay.Max {
+				return fmt.Errorf("request rule %d: responseDelay min (%d) cannot exceed max (%d)", i, delay.Min, delay.Max)
+			}
+			if delay.Max > MaxResponseDelayMs {
+				return fmt.Errorf("request rule %d: responseDelay max (%d) exceeds maximum allowed (%d)", i, delay.Max, MaxResponseDelayMs)
+			}
 		}
 	}
 

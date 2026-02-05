@@ -21,7 +21,7 @@ func TestLoggingMiddleware_CapturesRequestAndResponse(t *testing.T) {
 		func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-From", "next")
 			w.WriteHeader(http.StatusTeapot)
-			w.Write([]byte(`{"ok":true}`))
+			_, _ = w.Write([]byte(`{"ok":true}`))
 		},
 	)
 

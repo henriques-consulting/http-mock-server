@@ -5,20 +5,36 @@ import (
 	"fmt"
 	"http-mock-server/internal/config"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 )
 
 // MockHandler handles mock requests based on configuration
 type MockHandler struct {
 	config *config.Config
+	rand   *rand.Rand
+	randMu sync.Mutex
 }
 
 // NewMockHandler creates a new mock handler
 func NewMockHandler(cfg *config.Config) *MockHandler {
-	return &MockHandler{config: cfg}
+	return &MockHandler{
+		config: cfg,
+		rand:   rand.New(rand.NewSource(rand.Int63())),
+	}
+}
+
+// NewMockHandlerWithRand creates a new mock handler with a custom random source (for testing)
+func NewMockHandlerWithRand(cfg *config.Config, r *rand.Rand) *MockHandler {
+	return &MockHandler{
+		config: cfg,
+		rand:   r,
+	}
 }
 
 func (h *MockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +44,7 @@ func (h *MockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeResponse(w, rule)
+	h.writeResponse(w, r, rule)
 }
 
 func (h *MockHandler) findMatchingRule(r *http.Request) *config.RequestRule {
@@ -64,7 +80,19 @@ func (h *MockHandler) findMatchingRule(r *http.Request) *config.RequestRule {
 	return nil
 }
 
-func (h *MockHandler) writeResponse(w http.ResponseWriter, rule *config.RequestRule) {
+func (h *MockHandler) writeResponse(w http.ResponseWriter, r *http.Request, rule *config.RequestRule) {
+	// Apply response delay if configured
+	if delay := rule.ResponseDelay; delay != nil {
+		duration := h.calculateDelay(delay)
+		select {
+		case <-time.After(duration):
+			// Delay completed
+		case <-r.Context().Done():
+			// Client disconnected, abort
+			return
+		}
+	}
+
 	// Set response headers
 	for key, value := range rule.Response.Headers {
 		w.Header().Set(key, value)
@@ -82,6 +110,16 @@ func (h *MockHandler) writeResponse(w http.ResponseWriter, rule *config.RequestR
 		// Log error but don't change response since headers are already written
 		fmt.Printf("Error writing response body: %v\n", err)
 	}
+}
+
+func (h *MockHandler) calculateDelay(delay *config.ResponseDelay) time.Duration {
+	ms := delay.Min
+	if delay.Max > delay.Min {
+		h.randMu.Lock()
+		ms = delay.Min + h.rand.Intn(delay.Max-delay.Min+1)
+		h.randMu.Unlock()
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 func (h *MockHandler) writeBody(w http.ResponseWriter, body interface{}) error {
