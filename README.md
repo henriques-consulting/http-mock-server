@@ -9,6 +9,7 @@ A simple and configurable HTTP mock server written in Go that allows you to defi
 - **Query Parameter Matching**: Match query parameters with exact values or regex patterns
 - **Multiple Header Support**: Match against multiple headers simultaneously - all headers must match for the rule to apply
 - **Configurable Responses**: Define custom response bodies, status codes, and headers
+- **Response Delays**: Simulate slow endpoints with configurable random delays
 - **Request/Response Logging**: Comprehensive logging of all HTTP interactions
 - **Graceful Shutdown**: Proper cleanup on termination signals
 - **Health Check Endpoint**: Built-in `/health` endpoint for monitoring
@@ -79,6 +80,17 @@ requests:
         Content-Type: "application/json"
       body:
         results: []
+
+  # Simulate a slow endpoint with random delay
+  - path: /slow-api
+    method: GET
+    responseDelay:
+      min: 500
+      max: 1500
+    response:
+      status-code: 200
+      body:
+        message: "This response was delayed"
 ```
 
 2. **Build and run the server**:
@@ -122,6 +134,9 @@ curl http://localhost:8080/ping
 
 # Test the search endpoint with query parameters
 curl "http://localhost:8080/search?q=test&page=1"
+
+# Test the slow endpoint (will take 500-1500ms to respond)
+curl -w "\nTime: %{time_total}s\n" http://localhost:8080/slow-api
 ```
 
 ## Configuration Reference
@@ -135,6 +150,7 @@ Each request rule supports the following fields:
 - `headers` (optional): Map of header name to regex pattern. All headers must match for the rule to apply
 - `queryParams` (optional): Map of query parameter name to regex pattern. All specified params must match for the rule to apply
 - `body` (optional): Regex pattern to match against request body
+- `responseDelay` (optional): Delay configuration before sending response (see below)
 - `response` (required): Response specification
 
 ### Response Specification
@@ -182,6 +198,50 @@ queryParams:
 ```
 
 Note: If `queryParams` is not specified in a rule, the rule matches requests regardless of their query string. When specified, all listed parameters must be present and match their patterns. Extra query parameters in the request (not listed in the rule) are ignored.
+
+### Response Delay
+
+The `responseDelay` field allows you to simulate slow endpoints by adding a delay before the response is sent. This is useful for testing timeout handling, loading states, and retry logic in your applications.
+
+- `min` (required): Minimum delay in milliseconds
+- `max` (required): Maximum delay in milliseconds
+
+The actual delay for each request is randomly chosen between `min` and `max` (inclusive). For a fixed delay, set both values to the same number.
+
+**Constraints:**
+- Both `min` and `max` must be non-negative
+- `min` must be less than or equal to `max`
+- `max` cannot exceed 10,000ms (10 seconds)
+
+```yaml
+responseDelay:
+  # Random delay between 500ms and 1500ms
+  min: 500
+  max: 1500
+
+responseDelay:
+  # Fixed delay of exactly 1 second
+  min: 1000
+  max: 1000
+```
+
+**Example: Simulating a slow API**
+
+```yaml
+requests:
+  - path: /api/slow-operation
+    method: POST
+    responseDelay:
+      min: 2000
+      max: 5000
+    response:
+      status-code: 200
+      headers:
+        Content-Type: "application/json"
+      body:
+        status: "completed"
+        processingTime: "variable"
+```
 
 ## License
 

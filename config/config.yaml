@@ -35,3 +35,14 @@ requests:
         results: []
         query: "example"
       status-code: 200
+  - path: /slow-endpoint
+    method: GET
+    responseDelay:
+      min: 500
+      max: 1500
+    response:
+      headers:
+        content-type: "application/json"
+      body:
+        message: "This response was delayed"
+      status-code: 200
