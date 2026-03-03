@@ -546,6 +546,183 @@ func TestMockHandler_CalculateDelay(t *testing.T) {
 	}
 }
 
+func TestMockHandler_RandomBodyPlaintext(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/random-text",
+				Method: "GET",
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					RandomBody: &config.RandomBodySpec{Type: "plaintext", SizeBytes: 512},
+				},
+			},
+		},
+	}
+
+	r := rand.New(rand.NewSource(42))
+	h := NewMockHandlerWithRand(cfg, r)
+
+	rr := performRequest(h, http.MethodGet, "/random-text", nil, nil)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+	if rr.Body.Len() != 512 {
+		t.Fatalf("expected body size 512, got %d", rr.Body.Len())
+	}
+}
+
+func TestMockHandler_RandomBodyJSON(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/random-json",
+				Method: "GET",
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					Headers:    map[string]string{"content-type": "application/json"},
+					RandomBody: &config.RandomBodySpec{Type: "json", SizeBytes: 2048},
+				},
+			},
+		},
+	}
+
+	r := rand.New(rand.NewSource(42))
+	h := NewMockHandlerWithRand(cfg, r)
+
+	rr := performRequest(h, http.MethodGet, "/random-json", nil, nil)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+	if rr.Body.Len() != 2048 {
+		t.Fatalf("expected body size 2048, got %d", rr.Body.Len())
+	}
+	if rr.Header().Get("content-type") != "application/json" {
+		t.Fatalf("expected content-type application/json, got %q", rr.Header().Get("content-type"))
+	}
+
+	var obj interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &obj); err != nil {
+		t.Fatalf("expected valid JSON response, got error: %v", err)
+	}
+}
+
+func TestMockHandler_RandomBodyXML(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/random-xml",
+				Method: "GET",
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					Headers:    map[string]string{"content-type": "application/xml"},
+					RandomBody: &config.RandomBodySpec{Type: "xml", SizeBytes: 1024},
+				},
+			},
+		},
+	}
+
+	r := rand.New(rand.NewSource(42))
+	h := NewMockHandlerWithRand(cfg, r)
+
+	rr := performRequest(h, http.MethodGet, "/random-xml", nil, nil)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+	if rr.Body.Len() != 1024 {
+		t.Fatalf("expected body size 1024, got %d", rr.Body.Len())
+	}
+	if rr.Header().Get("content-type") != "application/xml" {
+		t.Fatalf("expected content-type application/xml, got %q", rr.Header().Get("content-type"))
+	}
+}
+
+func TestMockHandler_RandomBodyWithDelay(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/random-delayed",
+				Method: "GET",
+				ResponseDelay: &config.ResponseDelay{
+					Min: 50,
+					Max: 50,
+				},
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					RandomBody: &config.RandomBodySpec{Type: "plaintext", SizeBytes: 256},
+				},
+			},
+		},
+	}
+
+	r := rand.New(rand.NewSource(42))
+	h := NewMockHandlerWithRand(cfg, r)
+
+	start := time.Now()
+	rr := performRequest(h, http.MethodGet, "/random-delayed", nil, nil)
+	elapsed := time.Since(start)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rr.Code)
+	}
+	if rr.Body.Len() != 256 {
+		t.Fatalf("expected body size 256, got %d", rr.Body.Len())
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Fatalf("expected delay of at least 50ms, got %v", elapsed)
+	}
+}
+
+func TestMockHandler_ConcurrentRandomBodyRequests(t *testing.T) {
+	cfg := &config.Config{
+		Requests: []config.RequestRule{
+			{
+				Path:   "/concurrent-random",
+				Method: "GET",
+				Response: config.ResponseSpec{
+					StatusCode: 200,
+					RandomBody: &config.RandomBodySpec{Type: "json", SizeBytes: 512},
+				},
+			},
+		},
+	}
+
+	h := NewMockHandler(cfg)
+
+	var wg sync.WaitGroup
+	errors := make(chan error, 20)
+
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rr := performRequest(h, http.MethodGet, "/concurrent-random", nil, nil)
+			if rr.Code != http.StatusOK {
+				errors <- fmt.Errorf("unexpected status: %d", rr.Code)
+				return
+			}
+			if rr.Body.Len() != 512 {
+				errors <- fmt.Errorf("unexpected body size: %d", rr.Body.Len())
+				return
+			}
+			var obj interface{}
+			if err := json.Unmarshal(rr.Body.Bytes(), &obj); err != nil {
+				errors <- fmt.Errorf("invalid JSON: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		t.Error(err)
+	}
+}
+
 func TestMockHandler_ConcurrentDelayedRequests(t *testing.T) {
 	cfg := &config.Config{
 		Requests: []config.RequestRule{

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -26,6 +27,13 @@ type ResponseDelay struct {
 	Max int `yaml:"max"` // Maximum delay in milliseconds
 }
 
+// RandomBodySpec configures pre-generated random body content for a response
+type RandomBodySpec struct {
+	Type      string `yaml:"type"` // "plaintext", "json", or "xml"
+	Size      string `yaml:"size"` // Human-readable size, e.g. "2 MB", "512", "10kb"
+	SizeBytes int    `yaml:"-"`    // Parsed from Size during config loading
+}
+
 // RequestRule defines a single mock request matching rule
 type RequestRule struct {
 	Path          string            `yaml:"path"`
@@ -40,6 +48,7 @@ type RequestRule struct {
 // ResponseSpec describes the response to return when a rule matches
 type ResponseSpec struct {
 	Body       interface{}       `yaml:"body"`
+	RandomBody *RandomBodySpec   `yaml:"randomBody"`
 	StatusCode int               `yaml:"status-code"`
 	Headers    map[string]string `yaml:"headers"`
 }
@@ -81,9 +90,15 @@ func Load() (*Config, error) {
 	// Log each rule details
 	log.Printf("Loaded configuration from %s with %d request rules", configPath, len(config.Requests))
 	for i, rule := range config.Requests {
+		bodyDesc := "none"
+		if rb := rule.Response.RandomBody; rb != nil {
+			bodyDesc = fmt.Sprintf("random %s (%s)", rb.Type, formatBytes(rb.SizeBytes))
+		} else if rule.Response.Body != nil {
+			bodyDesc = "configured"
+		}
 		log.Printf(
 			"Rule %d: Path=%s, Method=%s, Headers=%v, QueryParams=%v, Body=%v, ResponseDelay=%v",
-			i+1, rule.Path, rule.Method, rule.Headers, rule.QueryParams, rule.Body, rule.ResponseDelay,
+			i+1, rule.Path, rule.Method, rule.Headers, rule.QueryParams, bodyDesc, rule.ResponseDelay,
 		)
 	}
 	return &config, nil
@@ -113,6 +128,64 @@ func (c *Config) setDefaults() error {
 // This value must be less than the server's WriteTimeout (15 seconds) to avoid connection resets.
 const MaxResponseDelayMs = 10000
 
+// MaxRandomBodySizeBytes is the maximum allowed random body size (2 GB) to support large payload and streaming testing.
+const MaxRandomBodySizeBytes = 2 * 1024 * 1024 * 1024
+
+// parseSize parses a human-readable size string into bytes.
+// The numeric part is an integer; the optional unit suffix (case-insensitive)
+// may be b, k/kb, m/mb, or g/gb. No suffix means bytes.
+// Examples: "512", "1000b", "10k", "10kb", "2 MB", "1 GB"
+func parseSize(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("size cannot be empty")
+	}
+	if s[0] == '-' {
+		return 0, fmt.Errorf("size cannot be negative")
+	}
+
+	// Split at the boundary between digits and the unit suffix.
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i == 0 {
+		return 0, fmt.Errorf("size %q must start with a number", s)
+	}
+
+	n, err := strconv.Atoi(s[:i])
+	if err != nil {
+		return 0, fmt.Errorf("invalid size %q: %w", s, err)
+	}
+
+	unit := strings.ToLower(strings.TrimSpace(s[i:]))
+	switch unit {
+	case "", "b":
+		return n, nil
+	case "k", "kb":
+		return n * 1024, nil
+	case "m", "mb":
+		return n * 1024 * 1024, nil
+	case "g", "gb":
+		return n * 1024 * 1024 * 1024, nil
+	default:
+		return 0, fmt.Errorf("size %q has unknown unit %q, use b, kb, mb, or gb", s, unit)
+	}
+}
+
+func formatBytes(n int) string {
+	switch {
+	case n >= 1024*1024*1024:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1024*1024*1024))
+	case n >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	case n >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
 func (c *Config) validate() error {
 	if c.Server.Port == 0 {
 		return fmt.Errorf("server port is required")
@@ -140,6 +213,34 @@ func (c *Config) validate() error {
 			}
 			if delay.Max > MaxResponseDelayMs {
 				return fmt.Errorf("request rule %d: responseDelay max (%d) exceeds maximum allowed (%d)", i, delay.Max, MaxResponseDelayMs)
+			}
+		}
+		if rb := rule.Response.RandomBody; rb != nil {
+			if rule.Response.Body != nil {
+				return fmt.Errorf("request rule %d: body and randomBody are mutually exclusive", i)
+			}
+			switch rb.Type {
+			case "plaintext", "json", "xml":
+				// valid
+			default:
+				return fmt.Errorf("request rule %d: randomBody type must be one of: plaintext, json, xml", i)
+			}
+			n, err := parseSize(rb.Size)
+			if err != nil {
+				return fmt.Errorf("request rule %d: randomBody size: %w", i, err)
+			}
+			rb.SizeBytes = n
+			if rb.SizeBytes > MaxRandomBodySizeBytes {
+				return fmt.Errorf("request rule %d: randomBody size (%s) exceeds maximum allowed (%s)", i, formatBytes(rb.SizeBytes), formatBytes(MaxRandomBodySizeBytes))
+			}
+			if rb.Type == "json" && rb.SizeBytes < 2 {
+				return fmt.Errorf("request rule %d: randomBody size for json must be at least 2", i)
+			}
+			if rb.Type == "json" && rb.SizeBytes > 2 && rb.SizeBytes < 7 {
+				return fmt.Errorf("request rule %d: randomBody size for json must be 2 or at least 7", i)
+			}
+			if rb.Type == "xml" && rb.SizeBytes < 7 {
+				return fmt.Errorf("request rule %d: randomBody size for xml must be at least 7", i)
 			}
 		}
 	}
