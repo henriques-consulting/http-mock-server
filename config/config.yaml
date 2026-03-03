@@ -46,3 +46,28 @@ requests:
       body:
         message: "This response was delayed"
       status-code: 200
+  - path: /random-json
+    method: GET
+    response:
+      status-code: 200
+      headers:
+        content-type: "application/json"
+      randomBody:
+        type: json
+        size: "2 gB"
+  - path: /random-text
+    method: GET
+    response:
+      status-code: 200
+      randomBody:
+        type: plaintext
+        size: "512"
+  - path: /random-xml
+    method: GET
+    response:
+      status-code: 200
+      headers:
+        content-type: "application/xml"
+      randomBody:
+        type: xml
+        size: "1 KB"

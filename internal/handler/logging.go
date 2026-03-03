@@ -8,17 +8,20 @@ import (
 	"sort"
 )
 
+// logBodyLimit is the maximum number of bytes logged for request and response bodies.
+// Bodies larger than this are replaced with an omission message in the log.
+const logBodyLimit = 1024
+
 // LoggingMiddleware returns middleware that logs all HTTP requests and responses
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			// Read and log request body
+			// Read up to logBodyLimit+1 bytes for log formatting.
+			// The original body is restored (including unread bytes) for the next handler.
 			var requestBody []byte
 			if r.Body != nil {
-				requestBody, _ = io.ReadAll(r.Body)
-				r.Body.Close()
-				// Restore the body for the next handler
-				r.Body = io.NopCloser(bytes.NewReader(requestBody))
+				requestBody, _ = io.ReadAll(io.LimitReader(r.Body, logBodyLimit+1))
+				r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(requestBody), r.Body))
 			}
 
 			// Wrap the response writer to capture response data
@@ -45,9 +48,11 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			}
 
 			// Format request body
-			reqBodyStr := string(requestBody)
-			if reqBodyStr == "" {
-				reqBodyStr = "(empty)"
+			reqBodyStr := "(empty)"
+			if len(requestBody) > logBodyLimit {
+				reqBodyStr = "(omitted, body exceeds 1024 bytes)"
+			} else if len(requestBody) > 0 {
+				reqBodyStr = string(requestBody)
 			}
 
 			// Format response headers
@@ -63,9 +68,11 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 				}
 			}
 			// Format response body
-			respBodyStr := lw.body.String()
-			if respBodyStr == "" {
-				respBodyStr = "(empty)"
+			respBodyStr := "(empty)"
+			if lw.body.Len() > logBodyLimit {
+				respBodyStr = "(omitted, body exceeds 1024 bytes)"
+			} else if lw.body.Len() > 0 {
+				respBodyStr = lw.body.String()
 			}
 
 			// Log the complete request/response with improved readability
@@ -110,7 +117,14 @@ func (lw *loggingResponseWriter) WriteHeader(code int) {
 }
 
 func (lw *loggingResponseWriter) Write(data []byte) (int, error) {
-	// Write to both the response body buffer and the actual response
-	lw.body.Write(data)
+	// Buffer up to logBodyLimit+1 bytes for logging; the full body is always sent to the client.
+	if lw.body.Len() <= logBodyLimit {
+		remaining := logBodyLimit + 1 - lw.body.Len()
+		if len(data) <= remaining {
+			lw.body.Write(data)
+		} else {
+			lw.body.Write(data[:remaining])
+		}
+	}
 	return lw.ResponseWriter.Write(data)
 }

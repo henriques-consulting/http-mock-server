@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"http-mock-server/internal/config"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -16,24 +17,44 @@ import (
 
 // MockHandler handles mock requests based on configuration
 type MockHandler struct {
-	config *config.Config
-	rand   *rand.Rand
-	randMu sync.Mutex
+	config       *config.Config
+	rand         *rand.Rand
+	randMu       sync.Mutex
+	cachedBodies map[*config.RandomBodySpec][]byte
 }
 
 // NewMockHandler creates a new mock handler
 func NewMockHandler(cfg *config.Config) *MockHandler {
-	return &MockHandler{
-		config: cfg,
-		rand:   rand.New(rand.NewSource(rand.Int63())),
+	h := &MockHandler{
+		config:       cfg,
+		rand:         rand.New(rand.NewSource(rand.Int63())),
+		cachedBodies: make(map[*config.RandomBodySpec][]byte),
 	}
+	h.preGenerateBodies()
+	return h
 }
 
 // NewMockHandlerWithRand creates a new mock handler with a custom random source (for testing)
 func NewMockHandlerWithRand(cfg *config.Config, r *rand.Rand) *MockHandler {
-	return &MockHandler{
-		config: cfg,
-		rand:   r,
+	h := &MockHandler{
+		config:       cfg,
+		rand:         r,
+		cachedBodies: make(map[*config.RandomBodySpec][]byte),
+	}
+	h.preGenerateBodies()
+	return h
+}
+
+func (h *MockHandler) preGenerateBodies() {
+	for i := range h.config.Requests {
+		rb := h.config.Requests[i].Response.RandomBody
+		if rb != nil {
+			data, err := h.generateRandomBody(rb)
+			if err != nil {
+				log.Fatalf("failed to pre-generate random body for rule %d: %v", i, err)
+			}
+			h.cachedBodies[rb] = data
+		}
 	}
 }
 
@@ -102,13 +123,18 @@ func (h *MockHandler) writeResponse(w http.ResponseWriter, r *http.Request, rule
 	w.WriteHeader(rule.Response.StatusCode)
 
 	// Write body if present
-	if rule.Response.Body == nil {
+	if rule.Response.Body != nil {
+		if err := h.writeBody(w, rule.Response.Body); err != nil {
+			fmt.Printf("Error writing response body: %v\n", err)
+		}
 		return
 	}
-
-	if err := h.writeBody(w, rule.Response.Body); err != nil {
-		// Log error but don't change response since headers are already written
-		fmt.Printf("Error writing response body: %v\n", err)
+	if rb := rule.Response.RandomBody; rb != nil {
+		if data, ok := h.cachedBodies[rb]; ok {
+			if _, err := w.Write(data); err != nil {
+				fmt.Printf("Error writing random body: %v\n", err)
+			}
+		}
 	}
 }
 

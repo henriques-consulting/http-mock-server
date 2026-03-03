@@ -9,6 +9,7 @@ A simple and configurable HTTP mock server written in Go that allows you to defi
 - **Query Parameter Matching**: Match query parameters with exact values or regex patterns
 - **Multiple Header Support**: Match against multiple headers simultaneously - all headers must match for the rule to apply
 - **Configurable Responses**: Define custom response bodies, status codes, and headers
+- **Random Response Bodies**: Pre-generated random bodies (plaintext, JSON, XML) for load testing
 - **Response Delays**: Simulate slow endpoints with configurable random delays
 - **Request/Response Logging**: Comprehensive logging of all HTTP interactions
 - **Graceful Shutdown**: Proper cleanup on termination signals
@@ -158,6 +159,7 @@ Each request rule supports the following fields:
 - `status-code` (optional): HTTP status code (defaults to 200)
 - `headers` (optional): Map of response headers to set
 - `body` (optional): Response body (can be string or structured data for JSON)
+- `randomBody` (optional): Pre-generated random body configuration (see below). Mutually exclusive with `body`
 
 ### Header Matching Examples
 
@@ -198,6 +200,64 @@ queryParams:
 ```
 
 Note: If `queryParams` is not specified in a rule, the rule matches requests regardless of their query string. When specified, all listed parameters must be present and match their patterns. Extra query parameters in the request (not listed in the rule) are ignored.
+
+### Random Body
+
+The `randomBody` field allows you to configure pre-generated random response bodies of a specific size and content type. Bodies are generated once at server startup and cached in memory, so serving them adds no per-request overhead. This is useful for load testing scenarios where you need realistic payloads of a specific size.
+
+`body` and `randomBody` are mutually exclusive -- you cannot set both on the same response.
+
+- `type` (required): Content type to generate. One of:
+  - `plaintext` -- random lowercase ASCII characters
+  - `json` -- valid JSON object with a random string value
+  - `xml` -- valid XML with a `<root>` wrapper and random content
+- `size` (required): Exact size of the generated body as a human-readable string. The unit suffix is case-insensitive; omitting the unit means bytes.
+
+| Example | Bytes |
+|---------|-------|
+| `"512"` or `"512b"` | 512 |
+| `"10k"` or `"10kb"` | 10 240 |
+| `"2 MB"` | 2 097 152 |
+| `"1 GB"` | 1 073 741 824 |
+
+**Constraints:**
+- `size` must be non-negative
+- `size` cannot exceed 2 GB
+- For `json`, `size` must be exactly 2 (empty `{}`) or at least 7
+- For `xml`, `size` must be at least 7 (smallest valid XML is `<r></r>`)
+
+```yaml
+# Random JSON body of 2 MB
+- path: /random-json
+  method: GET
+  response:
+    status-code: 200
+    headers:
+      content-type: "application/json"
+    randomBody:
+      type: json
+      size: "2 MB"
+
+# Random plaintext body of 512 bytes
+- path: /random-text
+  method: GET
+  response:
+    status-code: 200
+    randomBody:
+      type: plaintext
+      size: "512"
+
+# Random XML body of 1 KB
+- path: /random-xml
+  method: GET
+  response:
+    status-code: 200
+    headers:
+      content-type: "application/xml"
+    randomBody:
+      type: xml
+      size: "1 KB"
+```
 
 ### Response Delay
 
