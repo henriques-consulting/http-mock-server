@@ -297,25 +297,13 @@ func TestValidateResponseDelay(t *testing.T) {
 			errorMsg:    "responseDelay min (500) cannot exceed max (100)",
 		},
 		{
-			name:        "max exceeds limit",
-			delay:       &ResponseDelay{Min: 0, Max: 15000},
-			expectError: true,
-			errorMsg:    "responseDelay max (15000) exceeds maximum allowed",
-		},
-		{
-			name:        "max at limit is valid",
-			delay:       &ResponseDelay{Min: 0, Max: MaxResponseDelayMs},
+			name:        "large delay is valid",
+			delay:       &ResponseDelay{Min: 0, Max: 300000},
 			expectError: false,
 		},
 		{
-			name:        "max at limit+1 is invalid",
-			delay:       &ResponseDelay{Min: 0, Max: MaxResponseDelayMs + 1},
-			expectError: true,
-			errorMsg:    "exceeds maximum allowed",
-		},
-		{
-			name:        "fixed delay at max limit is valid",
-			delay:       &ResponseDelay{Min: MaxResponseDelayMs, Max: MaxResponseDelayMs},
+			name:        "fixed large delay is valid",
+			delay:       &ResponseDelay{Min: 300000, Max: 300000},
 			expectError: false,
 		},
 	}

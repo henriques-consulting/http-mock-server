@@ -124,10 +124,6 @@ func (c *Config) setDefaults() error {
 	return nil
 }
 
-// MaxResponseDelayMs is the maximum allowed response delay to prevent misconfiguration.
-// This value must be less than the server's WriteTimeout (15 seconds) to avoid connection resets.
-const MaxResponseDelayMs = 10000
-
 // MaxRandomBodySizeBytes is the maximum allowed random body size (2 GB) to support large payload and streaming testing.
 const MaxRandomBodySizeBytes = 2 * 1024 * 1024 * 1024
 
@@ -210,9 +206,6 @@ func (c *Config) validate() error {
 			}
 			if delay.Min > delay.Max {
 				return fmt.Errorf("request rule %d: responseDelay min (%d) cannot exceed max (%d)", i, delay.Min, delay.Max)
-			}
-			if delay.Max > MaxResponseDelayMs {
-				return fmt.Errorf("request rule %d: responseDelay max (%d) exceeds maximum allowed (%d)", i, delay.Max, MaxResponseDelayMs)
 			}
 		}
 		if rb := rule.Response.RandomBody; rb != nil {

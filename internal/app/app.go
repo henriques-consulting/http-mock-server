@@ -70,11 +70,10 @@ func (a *App) setupServer() {
 	mux.Handle("/", handler.LoggingMiddleware(mockHandler))
 
 	a.server = &http.Server{
-		Addr:         fmt.Sprintf(":%d", a.config.Server.Port),
-		Handler:      mux,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        fmt.Sprintf(":%d", a.config.Server.Port),
+		Handler:     mux,
+		ReadTimeout: 15 * time.Second,
+		IdleTimeout: 60 * time.Second,
 	}
 }
 
