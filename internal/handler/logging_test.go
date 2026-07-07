@@ -22,7 +22,7 @@ func TestLoggingMiddleware_OmitsLargeRequestBody(t *testing.T) {
 
 	handler := LoggingMiddleware(next)
 
-	largeBody := strings.Repeat("x", 1025)
+	largeBody := strings.Repeat("x", logBodyLimit+1)
 	req := httptest.NewRequest(http.MethodPost, "/large-body", strings.NewReader(largeBody))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -31,7 +31,7 @@ func TestLoggingMiddleware_OmitsLargeRequestBody(t *testing.T) {
 	if strings.Contains(out, largeBody) {
 		t.Fatal("expected large request body to be omitted from log")
 	}
-	if !strings.Contains(out, "(omitted, body exceeds 1024 bytes)") {
+	if !strings.Contains(out, bodyOmittedNotice) {
 		t.Fatalf("expected omission notice in log, got:\n%s", out)
 	}
 }
@@ -42,7 +42,7 @@ func TestLoggingMiddleware_OmitsLargeResponseBody(t *testing.T) {
 	defer log.SetOutput(oldOut)
 	log.SetOutput(&buf)
 
-	largeBody := strings.Repeat("y", 1025)
+	largeBody := strings.Repeat("y", logBodyLimit+1)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(largeBody))
@@ -63,7 +63,7 @@ func TestLoggingMiddleware_OmitsLargeResponseBody(t *testing.T) {
 	if strings.Contains(out, largeBody) {
 		t.Fatal("expected large response body to be omitted from log")
 	}
-	if !strings.Contains(out, "(omitted, body exceeds 1024 bytes)") {
+	if !strings.Contains(out, bodyOmittedNotice) {
 		t.Fatalf("expected omission notice in log, got:\n%s", out)
 	}
 }
@@ -130,7 +130,7 @@ func TestLoggingMiddleware_LargeRequestBodyPassthrough(t *testing.T) {
 	defer log.SetOutput(oldOut)
 	log.SetOutput(&buf)
 
-	largeBody := strings.Repeat("z", 2048)
+	largeBody := strings.Repeat("z", logBodyLimit+1)
 	var receivedBody []byte
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedBody, _ = io.ReadAll(r.Body)

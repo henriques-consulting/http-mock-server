@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -10,7 +11,9 @@ import (
 
 // logBodyLimit is the maximum number of bytes logged for request and response bodies.
 // Bodies larger than this are replaced with an omission message in the log.
-const logBodyLimit = 1024
+const logBodyLimit = 1024 * 1024
+
+var bodyOmittedNotice = fmt.Sprintf("(omitted, body exceeds %d bytes)", logBodyLimit)
 
 // LoggingMiddleware returns middleware that logs all HTTP requests and responses
 func LoggingMiddleware(next http.Handler) http.Handler {
@@ -50,7 +53,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			// Format request body
 			reqBodyStr := "(empty)"
 			if len(requestBody) > logBodyLimit {
-				reqBodyStr = "(omitted, body exceeds 1024 bytes)"
+				reqBodyStr = bodyOmittedNotice
 			} else if len(requestBody) > 0 {
 				reqBodyStr = string(requestBody)
 			}
@@ -70,7 +73,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			// Format response body
 			respBodyStr := "(empty)"
 			if lw.body.Len() > logBodyLimit {
-				respBodyStr = "(omitted, body exceeds 1024 bytes)"
+				respBodyStr = bodyOmittedNotice
 			} else if lw.body.Len() > 0 {
 				respBodyStr = lw.body.String()
 			}
