@@ -171,6 +171,271 @@ func TestLoggingMiddleware_EmptyBody(t *testing.T) {
 	}
 }
 
+func TestLoggingMiddleware_PrettyPrintsJSONRequestBody(t *testing.T) {
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := LoggingMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/json", strings.NewReader(`{"name":"a","nested":{"x":1}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	pretty := "    Body:\n        {\n          \"name\": \"a\",\n          \"nested\": {\n            \"x\": 1\n          }\n        }"
+	if !strings.Contains(out, pretty) {
+		t.Fatalf("expected pretty-printed JSON request body, got:\n%s", out)
+	}
+}
+
+func TestLoggingMiddleware_PrettyPrintsJSONResponseBody(t *testing.T) {
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
+	handler := LoggingMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/json", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	pretty := "    Body:\n        {\n          \"ok\": true\n        }"
+	if !strings.Contains(out, pretty) {
+		t.Fatalf("expected pretty-printed JSON response body, got:\n%s", out)
+	}
+}
+
+func TestLoggingMiddleware_PrettyPrintsJSONWithCharsetParameter(t *testing.T) {
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := LoggingMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/json", strings.NewReader(`{"ok":true}`))
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	if !strings.Contains(out, "    Body:\n        {\n          \"ok\": true\n        }") {
+		t.Fatalf("expected charset-parameterized JSON to be pretty-printed, got:\n%s", out)
+	}
+}
+
+func TestLoggingMiddleware_MalformedJSONFallsBackToRaw(t *testing.T) {
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := LoggingMiddleware(next)
+
+	malformed := `{"ok":true`
+	req := httptest.NewRequest(http.MethodPost, "/json", strings.NewReader(malformed))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	if !strings.Contains(out, "    Body: "+malformed) {
+		t.Fatalf("expected malformed JSON to log raw on a single line, got:\n%s", out)
+	}
+}
+
+func TestLoggingMiddleware_MalformedJSONResponseFallsBackToRaw(t *testing.T) {
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	malformed := `{"ok":true`
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(malformed))
+	})
+
+	handler := LoggingMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/bad-json", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	if !strings.Contains(out, "    Body: "+malformed) {
+		t.Fatalf("expected malformed JSON response body to log raw, got:\n%s", out)
+	}
+}
+
+func TestLoggingMiddleware_OmitsLargeJSONBody(t *testing.T) {
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := LoggingMiddleware(next)
+
+	largeBody := strings.Repeat("x", logBodyLimit+1)
+	req := httptest.NewRequest(http.MethodPost, "/large-json", strings.NewReader(largeBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	if !strings.Contains(out, bodyOmittedNotice) {
+		t.Fatalf("expected omission notice for large JSON body, got:\n%s", out)
+	}
+	if strings.Contains(out, "    Body:\n        {") {
+		t.Fatal("expected no pretty-print block when body exceeds size limit")
+	}
+}
+
+func TestLoggingMiddleware_BoundaryJSONBody(t *testing.T) {
+	// A JSON-content-typed body at exactly logBodyLimit must be logged, not
+	// omitted. Guards the > vs >= threshold now that logBodyLimit is the only
+	// bound on JSON pretty-printing. The body is intentionally invalid JSON so
+	// the raw fallback is taken and the assertion stays on the omission boundary.
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := LoggingMiddleware(next)
+
+	body := strings.Repeat("x", logBodyLimit)
+	req := httptest.NewRequest(http.MethodPost, "/boundary-json", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	if strings.Contains(out, "(omitted") {
+		t.Fatal("expected JSON body at exactly logBodyLimit bytes to be logged, not omitted")
+	}
+}
+
+func TestLoggingMiddleware_PrettyPrintsLargeJSONWithinLimit(t *testing.T) {
+	// A large JSON body (well over 64 KiB but within logBodyLimit) is still
+	// pretty-printed; logBodyLimit is the only bound.
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	filler := strings.Repeat("a", 256*1024)
+	body := `{"data":"` + filler + `"}`
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := LoggingMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodPost, "/big-json", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	if !strings.Contains(out, "    Body:\n        {") {
+		t.Fatalf("expected large within-limit JSON to be pretty-printed as an indented block, got body section start:\n%s", out[:min(len(out), 200)])
+	}
+	if !strings.Contains(out, `"data": "`) {
+		t.Fatal("expected pretty-printed JSON to add a space after the key colon")
+	}
+	if strings.Contains(out, "    Body: {") {
+		t.Fatal("expected the pretty-print path, not the inline raw path")
+	}
+}
+
+func TestLoggingMiddleware_ResponseBodyPartialTruncation(t *testing.T) {
+	// Two writes where the second straddles the capture limit: the client gets
+	// both chunks, and the log shows the omission notice.
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	firstChunk := strings.Repeat("a", logBodyLimit)
+	secondChunk := "overflow"
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(firstChunk))
+		_, _ = w.Write([]byte(secondChunk))
+	})
+
+	handler := LoggingMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/two-writes", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Body.Len() != logBodyLimit+len(secondChunk) {
+		t.Fatalf("expected client to receive %d bytes, got %d", logBodyLimit+len(secondChunk), rr.Body.Len())
+	}
+	out := buf.String()
+	if !strings.Contains(out, bodyOmittedNotice) {
+		t.Fatalf("expected omission notice when body exceeds limit across two writes, got:\n%s", out)
+	}
+}
+
+func TestLoggingMiddleware_NonJSONContentTypeNotPrettyPrinted(t *testing.T) {
+	var buf bytes.Buffer
+	oldOut := log.Writer()
+	defer log.SetOutput(oldOut)
+	log.SetOutput(&buf)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := LoggingMiddleware(next)
+
+	jsonLooking := `{"ok":true}`
+	req := httptest.NewRequest(http.MethodPost, "/text", strings.NewReader(jsonLooking))
+	req.Header.Set("Content-Type", "text/plain")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	out := buf.String()
+	if !strings.Contains(out, "    Body: "+jsonLooking) {
+		t.Fatalf("expected non-JSON content type to log body inline, got:\n%s", out)
+	}
+}
+
 func TestLoggingMiddleware_CapturesRequestAndResponse(t *testing.T) {
 	// Capture logs
 	var buf bytes.Buffer

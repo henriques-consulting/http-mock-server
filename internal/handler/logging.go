@@ -2,9 +2,11 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"sort"
 )
@@ -50,13 +52,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 				}
 			}
 
-			// Format request body
-			reqBodyStr := "(empty)"
-			if len(requestBody) > logBodyLimit {
-				reqBodyStr = bodyOmittedNotice
-			} else if len(requestBody) > 0 {
-				reqBodyStr = string(requestBody)
-			}
+			reqBodyStr := formatLogBody(requestBody, r.Header.Get("Content-Type"))
 
 			// Format response headers
 			var respHeadersBuf bytes.Buffer
@@ -70,13 +66,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 					respHeadersBuf.WriteString("\n        " + name + ": " + value)
 				}
 			}
-			// Format response body
-			respBodyStr := "(empty)"
-			if lw.body.Len() > logBodyLimit {
-				respBodyStr = bodyOmittedNotice
-			} else if lw.body.Len() > 0 {
-				respBodyStr = lw.body.String()
-			}
+			respBodyStr := formatLogBody(lw.body.Bytes(), lw.Header().Get("Content-Type"))
 
 			// Log the complete request/response with improved readability
 			log.Printf(
@@ -87,11 +77,11 @@ Request:
     Method: %s
     URI: %s
     Headers: %s
-    Body: %s
+    Body:%s
 Response:
     Status: %d
     Headers: %s
-    Body: %s
+    Body:%s
 =====================================================
 `,
 				r.RemoteAddr,
@@ -105,6 +95,24 @@ Response:
 			)
 		},
 	)
+}
+
+// formatLogBody prepends its own separator (a space, or a newline before an
+// indented block for JSON) so the caller's "Body:" label needs no trailing space.
+func formatLogBody(body []byte, contentType string) string {
+	if len(body) > logBodyLimit {
+		return " " + bodyOmittedNotice
+	}
+	if len(body) == 0 {
+		return " (empty)"
+	}
+	if mediaType, _, err := mime.ParseMediaType(contentType); err == nil && mediaType == "application/json" {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, body, "        ", "  "); err == nil {
+			return "\n        " + pretty.String()
+		}
+	}
+	return " " + string(body)
 }
 
 // loggingResponseWriter wraps http.ResponseWriter to capture response data
